@@ -58,7 +58,7 @@ const CONFIG = {
     radiusX: 180,
     attraction: 0.048,
     damping: 0.92,
-    releaseDamping: 0.992,
+    releaseDamping: 0.95,
     snapDistance: 0.8,
     holdFrames: 90,
   },
