@@ -1,6 +1,8 @@
 let video;
 let handPose;
 let hands = [];
+let cameraStarted = false;
+let cameraError = "";
 
 let regularFont, italicFont, bottomFont, topFont;
 let penguinLogo;
@@ -29,18 +31,20 @@ const CONFIG = {
   centerGap: 0.025,
   edgePadding: 2,
 
-  floatingText: [128,9,99, 100],
-  staticText: [128,9,99, 100],
+  floatingText: [128, 9, 99, 100],
+  staticText: [128, 9, 99, 100],
 
   popupText: [224, 68, 90, 100],
-  popupBox: [128,9,99, 88],
+  popupBox: [128, 9, 99, 88],
   popupButton: [224, 68, 90, 100],
-  popupButtonText: [128,9,99, 100],
+  popupButtonText: [128, 9, 99, 100],
 
   staticPaddingX: 0.12,
   staticTextSize: 0.022,
   staticLineGap: 0.008,
   staticBlockY: 0.88,
+
+  logoHeightRatio: 0.06,
 
   float: {
     minSpeed: 0.12,
@@ -74,33 +78,18 @@ function setup() {
   colorMode(HSB, 360, 100, 100, 100);
   textAlign(LEFT, BASELINE);
 
-  video = createCapture(VIDEO, { flipped: true });
-  video.size(640, 480);
-  video.hide();
-
-  handPose = ml5.handPose(
-    {
-      runtime: "mediapipe",
-      modelType: "full",
-      maxHands: 2,
-      flipped: true,
-    },
-    () => {
-      console.log("HandPose ready");
-    }
-  );
-
-  handPose.detectStart(video, (results) => {
-    hands = results || [];
-  });
-
   buildFloatingLetters();
 }
 
 function draw() {
   background(255);
 
-  drawVideoCover(video, 0, 0, width, height);
+  if (cameraStarted && video) {
+    drawVideoCover(video, 0, 0, width, height);
+  } else {
+    background(255);
+  }
+
   drawLogo();
   drawStaticTextBlock();
 
@@ -113,6 +102,108 @@ function draw() {
   if (introVisible) {
     drawIntroPopup();
   }
+
+  if (cameraError) {
+    drawCameraError();
+  }
+}
+
+async function startCameraAndHandTracking() {
+  if (cameraStarted) return;
+
+  cameraError = "";
+
+  try {
+    const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(
+      navigator.userAgent,
+    );
+
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: isMobileDevice ? "user" : "user",
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      flipped: true,
+    };
+
+    video = createCapture(constraints, () => {
+      console.log("Camera ready");
+    });
+
+    video.hide();
+
+    if (video.elt) {
+      video.elt.setAttribute("playsinline", "");
+      video.elt.setAttribute("autoplay", "");
+      video.elt.setAttribute("muted", "");
+      video.elt.muted = true;
+    }
+
+    await waitForVideoReady(video);
+
+    handPose = ml5.handPose(
+      {
+        runtime: "mediapipe",
+        modelType: "full",
+        maxHands: 2,
+        flipped: true,
+      },
+      () => {
+        console.log("HandPose ready");
+      },
+    );
+
+    handPose.detectStart(video, (results) => {
+      hands = results || [];
+    });
+
+    cameraStarted = true;
+  } catch (err) {
+    console.error(err);
+    cameraError =
+      "Camera access failed. On phone, open the site over HTTPS and allow camera permission.";
+  }
+}
+
+function waitForVideoReady(mediaEl) {
+  return new Promise((resolve, reject) => {
+    if (!mediaEl || !mediaEl.elt) {
+      reject(new Error("Video element not available"));
+      return;
+    }
+
+    const el = mediaEl.elt;
+
+    const done = () => {
+      if (el.videoWidth > 0 && el.videoHeight > 0) {
+        resolve();
+      }
+    };
+
+    if (el.readyState >= 2 && el.videoWidth > 0 && el.videoHeight > 0) {
+      resolve();
+      return;
+    }
+
+    const onLoaded = () => {
+      el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("canplay", onLoaded);
+      done();
+    };
+
+    el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("canplay", onLoaded);
+
+    setTimeout(() => {
+      if (el.videoWidth > 0 && el.videoHeight > 0) {
+        resolve();
+      } else {
+        reject(new Error("Video metadata timeout"));
+      }
+    }, 8000);
+  });
 }
 
 function buildFloatingLetters() {
@@ -134,8 +225,8 @@ function buildFloatingLetters() {
         item.font,
         item.style,
         item.targetX,
-        item.targetY
-      )
+        item.targetY,
+      ),
     );
   }
 }
@@ -239,7 +330,7 @@ function drawStaticTextBlock() {
 function drawLogo() {
   if (!penguinLogo) return;
 
-  const logoHeight = height * 0.06;
+  const logoHeight = height * CONFIG.logoHeightRatio;
   const logoWidth = logoHeight * (penguinLogo.width / penguinLogo.height);
 
   const x = width * 0.5 - logoWidth * 0.5;
@@ -247,6 +338,7 @@ function drawLogo() {
 
   image(penguinLogo, x, y, logoWidth, logoHeight);
 }
+
 function drawIntroPopup() {
   push();
 
@@ -262,14 +354,12 @@ function drawIntroPopup() {
   fill(...CONFIG.popupBox);
   rect(boxX, boxY, boxW, boxH, 22);
 
-  // button
   okButton.w = 80;
   okButton.h = 34;
   const bottomMargin = 16;
   okButton.x = width / 2 - okButton.w / 2;
   okButton.y = boxY + boxH - okButton.h - bottomMargin;
 
-  // message
   const line1 = "Interact with the letters";
   const line2 = "to form a connection";
 
@@ -294,7 +384,7 @@ function drawIntroPopup() {
     mouseY >= okButton.y &&
     mouseY <= okButton.y + okButton.h;
 
-  fill(224, 68, hovering ? 95 : 88, 100); 
+  fill(224, 68, hovering ? 95 : 88, 100);
   rect(okButton.x, okButton.y, okButton.w, okButton.h, 10);
 
   fill(0, 0, 100);
@@ -304,6 +394,21 @@ function drawIntroPopup() {
   textSize(14);
   text("OK", okButton.x + okButton.w / 2, okButton.y + okButton.h / 2);
 
+  pop();
+}
+
+function drawCameraError() {
+  push();
+  textAlign(CENTER, CENTER);
+  textFont(topFont);
+  textSize(14);
+  fill(0, 0, 100, 90);
+  rectMode(CENTER);
+  noStroke();
+  fill(0, 0, 0, 60);
+  rect(width / 2, height * 0.1, min(width * 0.8, 500), 46, 10);
+  fill(0, 0, 100, 100);
+  text(cameraError, width / 2, height * 0.1);
   pop();
 }
 
@@ -351,7 +456,7 @@ class FloatingLetter {
     const speed = constrain(
       this.vel.mag(),
       CONFIG.float.minSpeed,
-      CONFIG.float.maxSpeed
+      CONFIG.float.maxSpeed,
     );
     this.vel.setMag(speed);
   }
@@ -454,7 +559,7 @@ function drawFloatingLetters() {
 }
 
 function getPrimaryPalm() {
-  if (!hands.length || !video) return null;
+  if (!hands.length || !video || !video.elt) return null;
 
   let bestPalm = null;
   let bestScore = -Infinity;
@@ -474,17 +579,23 @@ function getPrimaryPalm() {
 }
 
 function getPalmPoint(hand) {
-  if (!hand.keypoints || hand.keypoints.length < 18 || !video) return null;
+  if (!hand.keypoints || hand.keypoints.length < 18 || !video || !video.elt) {
+    return null;
+  }
+
+  const vw = video.elt.videoWidth || video.width || 640;
+  const vh = video.elt.videoHeight || video.height || 480;
 
   const wrist = findKeypoint(hand, "wrist") || hand.keypoints[0];
   const indexBase = findKeypoint(hand, "index_finger_mcp") || hand.keypoints[5];
-  const pinkyBase = findKeypoint(hand, "pinky_finger_mcp") || hand.keypoints[17];
+  const pinkyBase =
+    findKeypoint(hand, "pinky_finger_mcp") || hand.keypoints[17];
 
   if (!wrist || !indexBase || !pinkyBase) return null;
 
   return {
-    x: ((wrist.x + indexBase.x + pinkyBase.x) / 3) * (width / video.width),
-    y: ((wrist.y + indexBase.y + pinkyBase.y) / 3) * (height / video.height),
+    x: ((wrist.x + indexBase.x + pinkyBase.x) / 3) * (width / vw),
+    y: ((wrist.y + indexBase.y + pinkyBase.y) / 3) * (height / vh),
   };
 }
 
@@ -578,44 +689,51 @@ function fitBlockSize(linesArr, size, maxWidth) {
 }
 
 function drawVideoCover(img, x, y, w, h) {
-  if (!img || !img.width || !img.height) return;
+  if (!img || !img.elt) return;
 
-  const imgAspect = img.width / img.height;
+  const sourceW = img.elt.videoWidth || img.width;
+  const sourceH = img.elt.videoHeight || img.height;
+  if (!sourceW || !sourceH) return;
+
+  const imgAspect = sourceW / sourceH;
   const boxAspect = w / h;
 
   let sx, sy, sw, sh;
 
   if (imgAspect > boxAspect) {
-    sh = img.height;
+    sh = sourceH;
     sw = sh * boxAspect;
-    sx = (img.width - sw) * 0.5;
+    sx = (sourceW - sw) * 0.5;
     sy = 0;
   } else {
-    sw = img.width;
+    sw = sourceW;
     sh = sw / boxAspect;
     sx = 0;
-    sy = (img.height - sh) * 0.5;
+    sy = (sourceH - sh) * 0.5;
   }
 
   image(img, x, y, w, h, sx, sy, sw, sh);
 }
 
-function mousePressed() {
-  if (!introVisible) return;
-
+function pressOk() {
   const inside =
     mouseX >= okButton.x &&
     mouseX <= okButton.x + okButton.w &&
     mouseY >= okButton.y &&
     mouseY <= okButton.y + okButton.h;
 
-  if (inside) {
+  if (introVisible && inside) {
     introVisible = false;
+    startCameraAndHandTracking();
   }
 }
 
+function mousePressed() {
+  pressOk();
+}
+
 function touchStarted() {
-  mousePressed();
+  pressOk();
   return false;
 }
 
