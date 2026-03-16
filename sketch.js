@@ -433,12 +433,19 @@ class FloatingLetter {
       return;
     }
 
-    const scaledRadius = CONFIG.scanGround.radiusX * min(width / 1200, 1.4);
+    const isPhone = width < 900;
+
+    const scaledRadius = isPhone
+      ? CONFIG.scanGround.radiusX * 1.35
+      : CONFIG.scanGround.radiusX * min(width / 1200, 1.4);
+
     const dx = abs(palm.x - this.target.x);
     const insideBand = dx <= scaledRadius;
 
     if (insideBand) {
-      this.groundHold = CONFIG.scanGround.holdFrames;
+      this.groundHold = isPhone
+        ? Math.floor(CONFIG.scanGround.holdFrames * 0.6)
+        : CONFIG.scanGround.holdFrames;
     } else if (this.groundHold > 0) {
       this.groundHold--;
     } else {
@@ -452,18 +459,28 @@ class FloatingLetter {
     const toTarget = p5.Vector.sub(this.target, this.pos);
     const d = toTarget.mag();
 
-    if (d < CONFIG.scanGround.snapDistance) {
-      this.pos.lerp(this.target, 0.18);
-      this.vel.mult(0.6);
+    const snapDistance = isPhone
+      ? CONFIG.scanGround.snapDistance * 2.5
+      : CONFIG.scanGround.snapDistance;
+
+    if (d < snapDistance) {
+      this.pos.lerp(this.target, isPhone ? 0.32 : 0.18);
+      this.vel.mult(isPhone ? 0.42 : 0.6);
       return;
     }
 
+    const attraction = isPhone
+      ? CONFIG.scanGround.attraction * 1.8
+      : CONFIG.scanGround.attraction;
+
+    const damping = isPhone ? 0.86 : CONFIG.scanGround.damping;
+
     const pull = toTarget
       .copy()
-      .mult(CONFIG.scanGround.attraction * max(eased, 0.2));
+      .mult(attraction * max(eased, isPhone ? 0.35 : 0.2));
 
     this.vel.add(pull);
-    this.vel.mult(lerp(1.0, CONFIG.scanGround.damping, max(eased, 0.35)));
+    this.vel.mult(lerp(1.0, damping, max(eased, isPhone ? 0.5 : 0.35)));
   }
 
   keepInCanvas() {
