@@ -1,6 +1,8 @@
 let video;
 let handPose;
 let hands = [];
+let cameraStarted = false;
+let cameraError = "";
 
 let regularFont, italicFont, bottomFont, topFont;
 let penguinLogo;
@@ -42,8 +44,10 @@ const CONFIG = {
   staticLineGap: 0.008,
   staticBlockY: 0.88,
 
+  logoHeightRatio: 0.06,
+
   float: {
-    minSpeed: 0.12,
+    minSpeed: 0.14,
     maxSpeed: 0.22,
     damping: 0.999,
     turnAmount: 0.01,
@@ -52,7 +56,7 @@ const CONFIG = {
 
   scanGround: {
     radiusX: 180,
-    attraction: 0.044,
+    attraction: 0.048,
     damping: 0.92,
     releaseDamping: 0.992,
     snapDistance: 0.8,
@@ -74,33 +78,16 @@ function setup() {
   colorMode(HSB, 360, 100, 100, 100);
   textAlign(LEFT, BASELINE);
 
-  video = createCapture(VIDEO, { flipped: true });
-  video.size(640, 480);
-  video.hide();
-
-  handPose = ml5.handPose(
-    {
-      runtime: "mediapipe",
-      modelType: "full",
-      maxHands: 2,
-      flipped: true,
-    },
-    () => {
-      console.log("HandPose ready");
-    },
-  );
-
-  handPose.detectStart(video, (results) => {
-    hands = results || [];
-  });
-
   buildFloatingLetters();
 }
 
 function draw() {
   background(255);
 
-  drawVideoCover(video, 0, 0, width, height);
+  if (cameraStarted && video) {
+    drawVideoCover(video, 0, 0, width, height);
+  }
+
   drawLogo();
   drawStaticTextBlock();
 
@@ -113,6 +100,64 @@ function draw() {
   if (introVisible) {
     drawIntroPopup();
   }
+
+  if (cameraError) {
+    drawCameraError();
+  }
+}
+
+function startCameraAndHandTracking() {
+  if (cameraStarted) return;
+
+  cameraError = "";
+
+  try {
+    video = createCapture(
+      {
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+        flipped: true,
+      },
+      () => {
+        console.log("Camera ready");
+      },
+    );
+
+    video.hide();
+
+    if (video.elt) {
+      video.elt.setAttribute("playsinline", "true");
+      video.elt.setAttribute("autoplay", "true");
+      video.elt.setAttribute("muted", "true");
+      video.elt.muted = true;
+    }
+
+    handPose = ml5.handPose(
+      {
+        runtime: "mediapipe",
+        modelType: "full",
+        maxHands: 2,
+        flipped: true,
+      },
+      () => {
+        console.log("HandPose ready");
+      },
+    );
+
+    handPose.detectStart(video, (results) => {
+      hands = results || [];
+    });
+
+    cameraStarted = true;
+  } catch (err) {
+    console.error(err);
+    cameraError =
+      "Camera access failed. Open the site over HTTPS and allow camera permission.";
+  }
 }
 
 function buildFloatingLetters() {
@@ -120,6 +165,10 @@ function buildFloatingLetters() {
 
   const maxWidth = width * 0.88;
   let sharedSize = height * CONFIG.sideTextSize;
+
+  if (width < 900) {
+    sharedSize = height * 0.1;
+  }
 
   sharedSize = fitSize(centerPhrase1, bottomFont, NORMAL, sharedSize, maxWidth);
   sharedSize = fitSize(centerPhrase2, italicFont, ITALIC, sharedSize, maxWidth);
@@ -239,7 +288,7 @@ function drawStaticTextBlock() {
 function drawLogo() {
   if (!penguinLogo) return;
 
-  const logoHeight = height * 0.06;
+  const logoHeight = height * CONFIG.logoHeightRatio;
   const logoWidth = logoHeight * (penguinLogo.width / penguinLogo.height);
 
   const x = width * 0.5 - logoWidth * 0.5;
@@ -247,6 +296,7 @@ function drawLogo() {
 
   image(penguinLogo, x, y, logoWidth, logoHeight);
 }
+
 function drawIntroPopup() {
   push();
 
@@ -262,14 +312,12 @@ function drawIntroPopup() {
   fill(...CONFIG.popupBox);
   rect(boxX, boxY, boxW, boxH, 22);
 
-  // button
   okButton.w = 80;
   okButton.h = 34;
   const bottomMargin = 16;
   okButton.x = width / 2 - okButton.w / 2;
   okButton.y = boxY + boxH - okButton.h - bottomMargin;
 
-  // message
   const line1 = "Interact with the letters";
   const line2 = "to form a connection";
 
@@ -282,17 +330,19 @@ function drawIntroPopup() {
   msgSize = constrain(msgSize, 14, 22);
   textSize(msgSize);
 
-  const lineGap = msgSize * 1.15;
+  const popupLineGap = msgSize * 1.15;
   const textCenterY = boxY + boxH * 0.26;
 
-  text(line1, width / 2, textCenterY - lineGap * 0.5);
-  text(line2, width / 2, textCenterY + lineGap * 0.5);
+  text(line1, width / 2, textCenterY - popupLineGap * 0.5);
+  text(line2, width / 2, textCenterY + popupLineGap * 0.5);
 
+  const pointer = getPointerPosition();
   const hovering =
-    mouseX >= okButton.x &&
-    mouseX <= okButton.x + okButton.w &&
-    mouseY >= okButton.y &&
-    mouseY <= okButton.y + okButton.h;
+    pointer &&
+    pointer.x >= okButton.x &&
+    pointer.x <= okButton.x + okButton.w &&
+    pointer.y >= okButton.y &&
+    pointer.y <= okButton.y + okButton.h;
 
   fill(224, 68, hovering ? 95 : 88, 100);
   rect(okButton.x, okButton.y, okButton.w, okButton.h, 10);
@@ -304,6 +354,21 @@ function drawIntroPopup() {
   textSize(14);
   text("OK", okButton.x + okButton.w / 2, okButton.y + okButton.h / 2);
 
+  pop();
+}
+
+function drawCameraError() {
+  push();
+  rectMode(CENTER);
+  noStroke();
+  fill(0, 0, 0, 60);
+  rect(width / 2, height * 0.1, min(width * 0.85, 520), 50, 10);
+
+  fill(0, 0, 100, 100);
+  textFont(topFont);
+  textAlign(CENTER, CENTER);
+  textSize(14);
+  text(cameraError, width / 2, height * 0.1);
   pop();
 }
 
@@ -454,7 +519,7 @@ function drawFloatingLetters() {
 }
 
 function getPrimaryPalm() {
-  if (!hands.length || !video) return null;
+  if (!hands.length || !video || !video.elt) return null;
 
   let bestPalm = null;
   let bestScore = -Infinity;
@@ -474,7 +539,12 @@ function getPrimaryPalm() {
 }
 
 function getPalmPoint(hand) {
-  if (!hand.keypoints || hand.keypoints.length < 18 || !video) return null;
+  if (!hand.keypoints || hand.keypoints.length < 18 || !video || !video.elt) {
+    return null;
+  }
+
+  const vw = video.elt.videoWidth || video.width || 640;
+  const vh = video.elt.videoHeight || video.height || 480;
 
   const wrist = findKeypoint(hand, "wrist") || hand.keypoints[0];
   const indexBase = findKeypoint(hand, "index_finger_mcp") || hand.keypoints[5];
@@ -484,8 +554,8 @@ function getPalmPoint(hand) {
   if (!wrist || !indexBase || !pinkyBase) return null;
 
   return {
-    x: ((wrist.x + indexBase.x + pinkyBase.x) / 3) * (width / video.width),
-    y: ((wrist.y + indexBase.y + pinkyBase.y) / 3) * (height / video.height),
+    x: ((wrist.x + indexBase.x + pinkyBase.x) / 3) * (width / vw),
+    y: ((wrist.y + indexBase.y + pinkyBase.y) / 3) * (height / vh),
   };
 }
 
@@ -579,44 +649,62 @@ function fitBlockSize(linesArr, size, maxWidth) {
 }
 
 function drawVideoCover(img, x, y, w, h) {
-  if (!img || !img.width || !img.height) return;
+  if (!img || !img.elt) return;
 
-  const imgAspect = img.width / img.height;
-  const boxAspect = w / h;
+  const sourceW = img.elt.videoWidth || img.width;
+  const sourceH = img.elt.videoHeight || img.height;
+  if (!sourceW || !sourceH) return;
 
-  let sx, sy, sw, sh;
+  const srcAspect = sourceW / sourceH;
+  const dstAspect = w / h;
 
-  if (imgAspect > boxAspect) {
-    sh = img.height;
-    sw = sh * boxAspect;
-    sx = (img.width - sw) * 0.5;
-    sy = 0;
+  let drawW, drawH, dx, dy;
+
+  if (srcAspect > dstAspect) {
+    drawH = h;
+    drawW = h * srcAspect;
+    dx = x - (drawW - w) / 2;
+    dy = y;
   } else {
-    sw = img.width;
-    sh = sw / boxAspect;
-    sx = 0;
-    sy = (img.height - sh) * 0.5;
+    drawW = w;
+    drawH = w / srcAspect;
+    dx = x;
+    dy = y - (drawH - h) / 2;
   }
 
-  image(img, x, y, w, h, sx, sy, sw, sh);
+  image(img, dx, dy, drawW, drawH);
+}
+
+function getPointerPosition() {
+  if (touches && touches.length > 0) {
+    return { x: touches[0].x, y: touches[0].y };
+  }
+  return { x: mouseX, y: mouseY };
+}
+
+function pressOk(px, py) {
+  const inside =
+    px >= okButton.x &&
+    px <= okButton.x + okButton.w &&
+    py >= okButton.y &&
+    py <= okButton.y + okButton.h;
+
+  if (introVisible && inside) {
+    introVisible = false;
+    startCameraAndHandTracking();
+  }
 }
 
 function mousePressed() {
-  if (!introVisible) return;
-
-  const inside =
-    mouseX >= okButton.x &&
-    mouseX <= okButton.x + okButton.w &&
-    mouseY >= okButton.y &&
-    mouseY <= okButton.y + okButton.h;
-
-  if (inside) {
-    introVisible = false;
-  }
+  pressOk(mouseX, mouseY);
 }
 
 function touchStarted() {
-  mousePressed();
+  if (touches && touches.length > 0) {
+    pressOk(touches[0].x, touches[0].y);
+  } else {
+    pressOk(mouseX, mouseY);
+  }
   return false;
 }
 
@@ -624,7 +712,7 @@ function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
 
   const maxWidth = width * 0.88;
-  let sharedSize = height * CONFIG.sideTextSize;
+  let sharedSize = height * (width < 900 ? 0.1 : CONFIG.sideTextSize);
 
   sharedSize = fitSize(centerPhrase1, bottomFont, NORMAL, sharedSize, maxWidth);
   sharedSize = fitSize(centerPhrase2, italicFont, ITALIC, sharedSize, maxWidth);
